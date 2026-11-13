@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 import random
 from drafter import *
 from datetime import datetime
-from bakery import assert_equal
+import bakery
+from unittest.mock import patch
 
 set_website_title("Matt's Test Website 11132026")
 set_site_information(
@@ -176,32 +177,28 @@ def display_current_encounter(state: State) -> Page:
         page_content.append("\n")
 
     # Display information about regular and Strong Enemies.
-    if state.current_encounter == "enemy" or state.current_encounter == "strong_enemy":
-        
+    if state.current_encounter in ("enemy", "strong_enemy"):
         enemy = state.current_enemy
 
-        page_content.extend([
-           Header(enemy.name, 2),
-           "Enemy Level: " + str(enemy.level),
-           "Enemy HP: " + str(enemy.hp) + "/" + str(enemy.max_hp),
-           "Enemy Attack: " + str(enemy.attack),
-           "Enemy Defense: " + str(enemy.defense)
-        ])
+        # Check that an enemy exists before displaying its attributes.
+        if enemy is not None:
+            page_content.extend([
+                Header(enemy.name, 2),
+                "Enemy Level: " + str(enemy.level),
+                "Enemy HP: " + str(enemy.hp) + "/" + str(enemy.max_hp),
+                "Enemy Attack: " + str(enemy.attack),
+                "Enemy Defense: " + str(enemy.defense)
+            ])
 
-        # Add the player's combat actions.
-        page_content.append(
-            Button("Attack Enemy", "attack_enemy")
-        )
+            # Add the player's combat actions.
+            page_content.append(Button("Attack Enemy", "attack_enemy"))
+            page_content.append(Button("Use Healing Potion", "use_potion"))
 
-        page_content.append(
-            Button("Use Healing Potion", "use_potion")
-        )
-
-        # Players cannot run away from Strong Enemies.
-        if not enemy.is_strong:
-            page_content.append(
-                Button("Run Away", "run_away")
-            )
+            # Players cannot run away from Strong Enemies.
+            if not enemy.is_strong:
+                page_content.append(Button("Run Away", "run_away"))
+        else:
+            page_content.append("No enemy is currently assigned to this encounter.")
 
     # Display the bush encounter.
     elif state.current_encounter == "bush":
@@ -214,13 +211,13 @@ def display_current_encounter(state: State) -> Page:
             Button(
                 "Investigate Bush",
                 "resolve_bush",
-                [Argument("decision", "investigate")]
+                {"decision": "investigate"}
             ),
     
             Button(
                 "Leave It Alone",
                 "resolve_bush",
-                [Argument("decision", "leave")]
+                {"decision": "leave"}
             )
         ])
 
@@ -235,13 +232,13 @@ def display_current_encounter(state: State) -> Page:
             Button(
                 "Open Chest",
                 "resolve_chest",
-                [Argument("decision", "open")]
+                {"decision": "open"}
             ),
     
             Button(
                 "Leave Chest Alone",
                 "resolve_chest",
-                [Argument("decision", "leave")]
+                {"decision": "leave"}
             )
         ])
 
@@ -346,10 +343,9 @@ def attack_enemy(state: State) -> Page:
     """Allow the player to attack an enemy and receive retaliation."""
 
     # Make sure there is an active enemy to fight.
-    if not state.dungeon_active or state.current_enemy is None:
-        return index(state, "There is no enemy to attack!")
-
     enemy = state.current_enemy
+    if not state.dungeon_active or enemy is None:
+        return index(state, "There is no enemy to attack!")
 
     # Calculate the damage dealt by the player.
     player_damage = max(1, int(state.weapon_atk) - enemy.defense)
@@ -436,7 +432,8 @@ def use_potion(state: State) -> Page:
     """Use a healing potion and allow the enemy to retaliate."""
 
     # Make sure there is an active enemy.
-    if not state.dungeon_active or state.current_enemy is None:
+    enemy = state.current_enemy
+    if not state.dungeon_active or enemy is None:
         return index(state, "There is no enemy to fight!")
 
     # Check whether the player has any potions.
@@ -467,8 +464,6 @@ def use_potion(state: State) -> Page:
     actual_healing = state.player_hp - old_hp
 
     # Allow the enemy to retaliate.
-    enemy = state.current_enemy
-
     enemy_damage = max(1, enemy.attack - state.player_defense)
 
     state.player_hp = max(0, state.player_hp - enemy_damage)
@@ -502,18 +497,19 @@ def run_away(state: State) -> Page:
     """Allow the player to escape a regular enemy encounter."""
 
     # Make sure there is an enemy to escape from.
-    if not state.dungeon_active or state.current_enemy is None:
+    enemy = state.current_enemy
+    if not state.dungeon_active or enemy is None:
         return index(state, "There is no enemy to escape from!")
 
     # Prevent players from fleeing Strong Enemies.
-    if state.current_enemy.is_strong:
+    if enemy.is_strong:
 
         state.encounter_message = "You cannot escape a Strong Enemy!"
 
         return display_current_encounter(state)
 
     # Remember the enemy's name before removing it.
-    enemy_name = state.current_enemy.name
+    enemy_name = enemy.name
 
     # Remove the current encounter.
     state.current_enemy = None
@@ -576,17 +572,15 @@ def resolve_bush(state: State, decision: str) -> Page:
             # Generate a randomly selected enemy.
             enemy_type = random.randint(0, 8)
 
-            state.current_enemy = create_enemy(
-                enemy_type,
-                state.lvl
-            )
+            enemy = create_enemy(enemy_type, state.lvl)
+            state.current_enemy = enemy
 
             # Convert the bush encounter into an enemy encounter.
             state.current_encounter = "enemy"
 
             state.encounter_message = (
                 "You investigated the bush, but a "
-                + state.current_enemy.name
+                + enemy.name
                 + " jumped out! Prepare to fight!"
             )
 
@@ -724,7 +718,7 @@ def index(state: State, message: str = "") -> Page:
     # Add a button to navigate to the Inventory page.
     page_content.append(
         Button("View Inventory", "display_inventory",
-               [Argument("previous_page", "index")])
+               {"previous_page": "index"})
     )
 
         # Only allow shopping and dungeon access when all quests are completed.
@@ -777,7 +771,7 @@ def display_shop(state: State, message: str = "") -> Page:
         Button(
             "Buy Healing Potion",
             "purchase_item",
-            [Argument("item", "potion")]
+            {"item": "potion"}
         ),
 
         Header("Weapon Upgrades", 2),
@@ -788,7 +782,7 @@ def display_shop(state: State, message: str = "") -> Page:
         Button(
             "Upgrade Weapon",
             "purchase_item",
-            [Argument("item", "weapon")]
+            {"item": "weapon"}
         ),
 
         "\n",
@@ -1110,41 +1104,41 @@ def start_dungeon(state: State) -> Page:
 # ==========================================
 
 # calculate_quest_rewards()
-assert_equal((10, 5), calculate_quest_rewards(1, 1))
-assert_equal((100, 50), calculate_quest_rewards(10, 1))
-assert_equal((60, 29), calculate_quest_rewards(5, 3))
+bakery.assert_equal((10, 5), calculate_quest_rewards(1, 1))
+bakery.assert_equal((100, 50), calculate_quest_rewards(10, 1))
+bakery.assert_equal((60, 29), calculate_quest_rewards(5, 3))
 
 
 # create_seed()
-assert_equal(True, 100000 <= create_seed() <= 999999)
-assert_equal(True, 100000 <= create_seed() <= 999999)
-assert_equal(True, 100000 <= create_seed() <= 999999)
+bakery.assert_equal(True, 100000 <= create_seed() <= 999999)
+bakery.assert_equal(True, 100000 <= create_seed() <= 999999)
+bakery.assert_equal(True, 100000 <= create_seed() <= 999999)
 
 
 # create_enemy()
 _test_bat = create_enemy(0, 1)
-assert_equal(("Bat", 20, 2, 0, False),
+bakery.assert_equal(("Bat", 20, 2, 0, False),
              (_test_bat.name, _test_bat.hp, _test_bat.attack,
               _test_bat.defense, _test_bat.is_strong))
 
 _test_slime = create_enemy(1, 3)
-assert_equal(("Slime", 40, 5, 3),
+bakery.assert_equal(("Slime", 40, 5, 3),
              (_test_slime.name, _test_slime.hp,
               _test_slime.attack, _test_slime.defense))
 
 _test_strong = create_enemy(7, 2, True)
-assert_equal(("Strong Knight Armor", 30, 7, 7, True),
+bakery.assert_equal(("Strong Knight Armor", 30, 7, 7, True),
              (_test_strong.name, _test_strong.hp,
               _test_strong.attack, _test_strong.defense,
               _test_strong.is_strong))
 
 
 # determine_encounter()
-assert_equal(("enemy", 1), determine_encounter(123456, 1))
-assert_equal("strong_enemy", determine_encounter(123456, 7)[0])
+bakery.assert_equal(("enemy", 1), determine_encounter(123456, 1))
+bakery.assert_equal("strong_enemy", determine_encounter(123456, 7)[0])
 
 _special_test = determine_encounter(999999, 1)
-assert_equal(True, _special_test in [("bush", None), ("chest", None)])
+bakery.assert_equal(True, _special_test in [("bush", None), ("chest", None)])
 
 # ==========================================
 # UNIT TESTS: DUNGEON DISPLAY FUNCTIONS
@@ -1157,26 +1151,26 @@ _test_page = display_current_encounter(State(
     current_encounter="enemy",
     current_enemy=Enemy("Bat", 1, 20, 20, 2, 0)
 ))
-assert_equal(Page, type(_test_page))
+bakery.assert_equal(Page, type(_test_page))
 
 _test_page = display_current_encounter(State(
     dungeon_active=True,
     current_encounter="bush"
 ))
-assert_equal(Page, type(_test_page))
+bakery.assert_equal(Page, type(_test_page))
 
 _test_page = display_current_encounter(State(
     dungeon_active=True,
     current_encounter="chest"
 ))
-assert_equal(Page, type(_test_page))
+bakery.assert_equal(Page, type(_test_page))
 
 
 # display_room_cleared()
 
-assert_equal(Page, type(display_room_cleared(State(), "Test message")))
-assert_equal(Page, type(display_room_cleared(State(), "Enemy defeated!")))
-assert_equal(Page, type(display_room_cleared(State(), "Bush investigated!")))
+bakery.assert_equal(Page, type(display_room_cleared(State(), "Test message")))
+bakery.assert_equal(Page, type(display_room_cleared(State(), "Enemy defeated!")))
+bakery.assert_equal(Page, type(display_room_cleared(State(), "Bush investigated!")))
 
 
 # display_dungeon_defeat()
@@ -1191,9 +1185,9 @@ _test_defeat_state = State(
 
 _test_page = display_dungeon_defeat(_test_defeat_state)
 
-assert_equal(Page, type(_test_page))
-assert_equal(False, _test_defeat_state.dungeon_active)
-assert_equal((None, "", 0, 0),
+bakery.assert_equal(Page, type(_test_page))
+bakery.assert_equal(False, _test_defeat_state.dungeon_active)
+bakery.assert_equal((None, "", 0, 0),
              (_test_defeat_state.current_enemy,
               _test_defeat_state.current_encounter,
               _test_defeat_state.dungeon_exp,
@@ -1213,12 +1207,12 @@ _test_victory_state = State(
 
 _test_page = display_dungeon_victory(_test_victory_state)
 
-assert_equal(Page, type(_test_page))
-assert_equal((2, 0, 25),
+bakery.assert_equal(Page, type(_test_page))
+bakery.assert_equal((2, 0, 25),
              (_test_victory_state.lvl,
               _test_victory_state.exp,
               _test_victory_state.gold))
-assert_equal((0, 0, False, None, ""),
+bakery.assert_equal((0, 0, False, None, ""),
              (_test_victory_state.dungeon_exp,
               _test_victory_state.dungeon_gold,
               _test_victory_state.dungeon_active,
@@ -1242,9 +1236,13 @@ _test_combat_state = State(
 
 attack_enemy(_test_combat_state)
 
-assert_equal(16, _test_combat_state.current_enemy.hp)
-assert_equal(99, _test_combat_state.player_hp)
-assert_equal("enemy", _test_combat_state.current_encounter)
+bakery.assert_equal(
+    16,
+    _test_combat_state.current_enemy.hp
+    if _test_combat_state.current_enemy is not None else -1
+)
+bakery.assert_equal(99, _test_combat_state.player_hp)
+bakery.assert_equal("enemy", _test_combat_state.current_encounter)
 
 
 _test_kill_state = State(
@@ -1257,9 +1255,9 @@ _test_kill_state = State(
 
 attack_enemy(_test_kill_state)
 
-assert_equal(None, _test_kill_state.current_enemy)
-assert_equal(1, _test_kill_state.enemies_defeated)
-assert_equal((10, 5),
+bakery.assert_equal(None, _test_kill_state.current_enemy)
+bakery.assert_equal(1, _test_kill_state.enemies_defeated)
+bakery.assert_equal((10, 5),
              (_test_kill_state.dungeon_exp,
               _test_kill_state.dungeon_gold))
 
@@ -1276,7 +1274,7 @@ _test_strong_state = State(
 
 attack_enemy(_test_strong_state)
 
-assert_equal((False, 30, 15),
+bakery.assert_equal((False, 30, 15),
              (_test_strong_state.dungeon_active,
               _test_strong_state.exp,
               _test_strong_state.gold))
@@ -1295,9 +1293,13 @@ _test_potion_state = State(
 
 use_potion(_test_potion_state)
 
-assert_equal(1, _test_potion_state.potion_count)
-assert_equal(84, _test_potion_state.player_hp)
-assert_equal(20, _test_potion_state.current_enemy.hp)
+bakery.assert_equal(1, _test_potion_state.potion_count)
+bakery.assert_equal(84, _test_potion_state.player_hp)
+bakery.assert_equal(
+    20,
+    _test_potion_state.current_enemy.hp
+    if _test_potion_state.current_enemy is not None else -1
+)
 
 
 _test_no_potion = State(
@@ -1310,9 +1312,9 @@ _test_no_potion = State(
 
 use_potion(_test_no_potion)
 
-assert_equal(0, _test_no_potion.potion_count)
-assert_equal(50, _test_no_potion.player_hp)
-assert_equal("enemy", _test_no_potion.current_encounter)
+bakery.assert_equal(0, _test_no_potion.potion_count)
+bakery.assert_equal(50, _test_no_potion.player_hp)
+bakery.assert_equal("enemy", _test_no_potion.current_encounter)
 
 
 _test_full_hp = State(
@@ -1325,9 +1327,9 @@ _test_full_hp = State(
 
 use_potion(_test_full_hp)
 
-assert_equal(1, _test_full_hp.potion_count)
-assert_equal(100, _test_full_hp.player_hp)
-assert_equal("enemy", _test_full_hp.current_encounter)
+bakery.assert_equal(1, _test_full_hp.potion_count)
+bakery.assert_equal(100, _test_full_hp.player_hp)
+bakery.assert_equal("enemy", _test_full_hp.current_encounter)
 
 
 # run_away()
@@ -1341,9 +1343,9 @@ _test_run_state = State(
 
 run_away(_test_run_state)
 
-assert_equal("", _test_run_state.current_encounter)
-assert_equal(None, _test_run_state.current_enemy)
-assert_equal(2, _test_run_state.room_count)
+bakery.assert_equal("", _test_run_state.current_encounter)
+bakery.assert_equal(None, _test_run_state.current_enemy)
+bakery.assert_equal(2, _test_run_state.room_count)
 
 
 _test_strong_run = State(
@@ -1355,15 +1357,19 @@ _test_strong_run = State(
 
 run_away(_test_strong_run)
 
-assert_equal("strong_enemy", _test_strong_run.current_encounter)
-assert_equal(True, _test_strong_run.current_enemy.is_strong)
-assert_equal(7, _test_strong_run.room_count)
+bakery.assert_equal("strong_enemy", _test_strong_run.current_encounter)
+bakery.assert_equal(
+    True,
+    _test_strong_run.current_enemy.is_strong
+    if _test_strong_run.current_enemy is not None else False
+)
+bakery.assert_equal(7, _test_strong_run.room_count)
 
 
 _test_no_enemy = run_away(State())
-assert_equal(Page, type(_test_no_enemy))
-assert_equal(False, State().dungeon_active)
-assert_equal(None, State().current_enemy)
+bakery.assert_equal(Page, type(_test_no_enemy))
+bakery.assert_equal(False, State().dungeon_active)
+bakery.assert_equal(None, State().current_enemy)
 
 # ==========================================
 # UNIT TESTS: SPECIAL ENCOUNTERS
@@ -1372,9 +1378,9 @@ assert_equal(None, State().current_enemy)
 # resolve_bush()
 
 _test_bush_invalid = resolve_bush(State(), "investigate")
-assert_equal(Page, type(_test_bush_invalid))
-assert_equal("", State().current_encounter)
-assert_equal(2, State().potion_count)
+bakery.assert_equal(Page, type(_test_bush_invalid))
+bakery.assert_equal("", State().current_encounter)
+bakery.assert_equal(2, State().potion_count)
 
 
 _test_bush_leave = State(
@@ -1384,35 +1390,27 @@ _test_bush_leave = State(
 
 resolve_bush(_test_bush_leave, "leave")
 
-assert_equal("", _test_bush_leave.current_encounter)
-assert_equal(None, _test_bush_leave.current_enemy)
-assert_equal(0, _test_bush_leave.room_count)
+bakery.assert_equal("", _test_bush_leave.current_encounter)
+bakery.assert_equal(None, _test_bush_leave.current_enemy)
+bakery.assert_equal(0, _test_bush_leave.room_count)
 
 
-# Force both possible bush outcomes.
-_original_choice = random.choice
+# Force both possible bush outcomes without permanently changing random.choice.
+with patch("random.choice", return_value="potion"):
+    _test_bush_potion = State(
+        dungeon_active=True,
+        current_encounter="bush"
+    )
+    resolve_bush(_test_bush_potion, "investigate")
 
-random.choice = lambda options: "potion"
+with patch("random.choice", return_value="enemy"):
+    _test_bush_enemy = State(
+        dungeon_active=True,
+        current_encounter="bush"
+    )
+    resolve_bush(_test_bush_enemy, "investigate")
 
-_test_bush_potion = State(
-    dungeon_active=True,
-    current_encounter="bush"
-)
-
-resolve_bush(_test_bush_potion, "investigate")
-
-random.choice = lambda options: "enemy"
-
-_test_bush_enemy = State(
-    dungeon_active=True,
-    current_encounter="bush"
-)
-
-resolve_bush(_test_bush_enemy, "investigate")
-
-random.choice = _original_choice
-
-assert_equal((3, "enemy", True),
+bakery.assert_equal((3, "enemy", True),
              (_test_bush_potion.potion_count,
               _test_bush_enemy.current_encounter,
               _test_bush_enemy.current_enemy is not None))
@@ -1421,9 +1419,9 @@ assert_equal((3, "enemy", True),
 # resolve_chest()
 
 _test_chest_invalid = resolve_chest(State(), "open")
-assert_equal(Page, type(_test_chest_invalid))
-assert_equal("", State().current_encounter)
-assert_equal(2, State().potion_count)
+bakery.assert_equal(Page, type(_test_chest_invalid))
+bakery.assert_equal("", State().current_encounter)
+bakery.assert_equal(2, State().potion_count)
 
 
 _test_chest_leave = State(
@@ -1433,37 +1431,29 @@ _test_chest_leave = State(
 
 resolve_chest(_test_chest_leave, "leave")
 
-assert_equal("", _test_chest_leave.current_encounter)
-assert_equal(100, _test_chest_leave.player_hp)
-assert_equal(0, _test_chest_leave.room_count)
+bakery.assert_equal("", _test_chest_leave.current_encounter)
+bakery.assert_equal(100, _test_chest_leave.player_hp)
+bakery.assert_equal(0, _test_chest_leave.room_count)
 
 
-# Force both possible chest outcomes.
-_original_randint = random.randint
+# Force both possible chest outcomes without permanently changing random.randint.
+with patch("random.randint", return_value=1):
+    _test_chest_reward = State(
+        dungeon_active=True,
+        current_encounter="chest",
+        potion_count=2
+    )
+    resolve_chest(_test_chest_reward, "open")
 
-random.randint = lambda low, high: 1
+with patch("random.randint", return_value=100):
+    _test_chest_trap = State(
+        dungeon_active=True,
+        current_encounter="chest",
+        player_hp=100
+    )
+    resolve_chest(_test_chest_trap, "open")
 
-_test_chest_reward = State(
-    dungeon_active=True,
-    current_encounter="chest",
-    potion_count=2
-)
-
-resolve_chest(_test_chest_reward, "open")
-
-random.randint = lambda low, high: 100
-
-_test_chest_trap = State(
-    dungeon_active=True,
-    current_encounter="chest",
-    player_hp=100
-)
-
-resolve_chest(_test_chest_trap, "open")
-
-random.randint = _original_randint
-
-assert_equal((4, 50),
+bakery.assert_equal((4, 50),
              (_test_chest_reward.potion_count,
               _test_chest_trap.player_hp))
 
@@ -1473,34 +1463,34 @@ assert_equal((4, 50),
 
 # index()
 
-assert_equal(Page, type(index(State())))
-assert_equal(Page, type(index(State(
+bakery.assert_equal(Page, type(index(State())))
+bakery.assert_equal(Page, type(index(State(
     quests=[Quest("Homework", 5, 20261115, 50, 25)]
 ))))
-assert_equal(Page, type(index(State(dungeon_active=True))))
+bakery.assert_equal(Page, type(index(State(dungeon_active=True))))
 
 
 # display_shop()
 
-assert_equal(Page, type(display_shop(State())))
-assert_equal(Page, type(display_shop(State(
+bakery.assert_equal(Page, type(display_shop(State())))
+bakery.assert_equal(Page, type(display_shop(State(
     quests=[Quest("Homework", 5, 20261115, 50, 25)]
 ))))
-assert_equal(Page, type(display_shop(State(dungeon_active=True))))
+bakery.assert_equal(Page, type(display_shop(State(dungeon_active=True))))
 
 
 # display_inventory()
 
-assert_equal(Page, type(display_inventory(State())))
-assert_equal(Page, type(display_inventory(State(), "display_shop")))
-assert_equal(Page, type(display_inventory(State(gold=100))))
+bakery.assert_equal(Page, type(display_inventory(State())))
+bakery.assert_equal(Page, type(display_inventory(State(), "display_shop")))
+bakery.assert_equal(Page, type(display_inventory(State(gold=100))))
 
 
 # add_quest()
 
-assert_equal(Page, type(add_quest(State())))
-assert_equal(Page, type(add_quest(State(), "Invalid quest name!")))
-assert_equal(Page, type(add_quest(State(gold=100))))
+bakery.assert_equal(Page, type(add_quest(State())))
+bakery.assert_equal(Page, type(add_quest(State(), "Invalid quest name!")))
+bakery.assert_equal(Page, type(add_quest(State(gold=100))))
 
 # ==========================================
 # UNIT TESTS: QUEST FUNCTIONS
@@ -1512,26 +1502,26 @@ _test_buy_potion = State(gold=30, potion_count=2)
 
 purchase_item(_test_buy_potion, "potion")
 
-assert_equal(10, _test_buy_potion.gold)
-assert_equal(3, _test_buy_potion.potion_count)
-assert_equal(5.0, _test_buy_potion.weapon_atk)
+bakery.assert_equal(10, _test_buy_potion.gold)
+bakery.assert_equal(3, _test_buy_potion.potion_count)
+bakery.assert_equal(5.0, _test_buy_potion.weapon_atk)
 
 
 _test_buy_weapon = State(gold=100, weapon_atk=5.0)
 
 purchase_item(_test_buy_weapon, "weapon")
 
-assert_equal(50, _test_buy_weapon.gold)
-assert_equal(7.0, _test_buy_weapon.weapon_atk)
-assert_equal(2, _test_buy_weapon.potion_count)
+bakery.assert_equal(50, _test_buy_weapon.gold)
+bakery.assert_equal(7.0, _test_buy_weapon.weapon_atk)
+bakery.assert_equal(2, _test_buy_weapon.potion_count)
 
 _test_insufficient = State(gold=10, potion_count=2)
 
 purchase_item(_test_insufficient, "potion")
 
-assert_equal(10, _test_insufficient.gold)
-assert_equal(2, _test_insufficient.potion_count)
-assert_equal(5.0, _test_insufficient.weapon_atk)
+bakery.assert_equal(10, _test_insufficient.gold)
+bakery.assert_equal(2, _test_insufficient.potion_count)
+bakery.assert_equal(5.0, _test_insufficient.weapon_atk)
 
 
 # complete_quests()
@@ -1542,9 +1532,9 @@ _test_complete_one = State(
 
 complete_quests(_test_complete_one, ["0"])
 
-assert_equal(0, len(_test_complete_one.quests))
-assert_equal(30, _test_complete_one.exp)
-assert_equal(15, _test_complete_one.gold)
+bakery.assert_equal(0, len(_test_complete_one.quests))
+bakery.assert_equal(30, _test_complete_one.exp)
+bakery.assert_equal(15, _test_complete_one.gold)
 
 
 _test_complete_level = State(
@@ -1555,9 +1545,9 @@ _test_complete_level = State(
 
 complete_quests(_test_complete_level, ["0"])
 
-assert_equal(2, _test_complete_level.lvl)
-assert_equal(0, _test_complete_level.exp)
-assert_equal(5, _test_complete_level.gold)
+bakery.assert_equal(2, _test_complete_level.lvl)
+bakery.assert_equal(0, _test_complete_level.exp)
+bakery.assert_equal(5, _test_complete_level.gold)
 
 
 _test_complete_none = State(
@@ -1566,9 +1556,9 @@ _test_complete_none = State(
 
 complete_quests(_test_complete_none, [])
 
-assert_equal(1, len(_test_complete_none.quests))
-assert_equal(0, _test_complete_none.exp)
-assert_equal(0, _test_complete_none.gold)
+bakery.assert_equal(1, len(_test_complete_none.quests))
+bakery.assert_equal(0, _test_complete_none.exp)
+bakery.assert_equal(0, _test_complete_none.gold)
 
 
 # save_quest()
@@ -1576,17 +1566,17 @@ assert_equal(0, _test_complete_none.gold)
 _test_blank = State()
 _blank_page = save_quest(_test_blank, "", "11-15-26", "3")
 
-assert_equal(Page, type(_blank_page))
-assert_equal(0, len(_test_blank.quests))
-assert_equal(0, _test_blank.gold)
+bakery.assert_equal(Page, type(_blank_page))
+bakery.assert_equal(0, len(_test_blank.quests))
+bakery.assert_equal(0, _test_blank.gold)
 
 
 _test_bad_date = State()
 _bad_date_page = save_quest(_test_bad_date, "Homework", "13-40-26", "3")
 
-assert_equal(Page, type(_bad_date_page))
-assert_equal(0, len(_test_bad_date.quests))
-assert_equal(0, _test_bad_date.exp)
+bakery.assert_equal(Page, type(_bad_date_page))
+bakery.assert_equal(0, len(_test_bad_date.quests))
+bakery.assert_equal(0, _test_bad_date.exp)
 
 
 _test_valid_quest = State(
@@ -1596,9 +1586,9 @@ _test_valid_quest = State(
 
 save_quest(_test_valid_quest, "Earlier Task", "11-15-26", "3")
 
-assert_equal(2, len(_test_valid_quest.quests))
-assert_equal(20261115, _test_valid_quest.quests[0].date)
-assert_equal((35, 17),
+bakery.assert_equal(2, len(_test_valid_quest.quests))
+bakery.assert_equal(20261115, _test_valid_quest.quests[0].date)
+bakery.assert_equal((35, 17),
              (_test_valid_quest.quests[0].exp,
               _test_valid_quest.quests[0].gold))
 
@@ -1610,9 +1600,9 @@ assert_equal((35, 17),
 
 _test_inactive = generate_dungeon_room(State())
 
-assert_equal(Page, type(_test_inactive))
-assert_equal(False, State().dungeon_active)
-assert_equal(0, State().room_count)
+bakery.assert_equal(Page, type(_test_inactive))
+bakery.assert_equal(False, State().dungeon_active)
+bakery.assert_equal(0, State().room_count)
 
 
 _test_existing_room = State(
@@ -1623,9 +1613,9 @@ _test_existing_room = State(
 
 _test_existing_page = generate_dungeon_room(_test_existing_room)
 
-assert_equal(Page, type(_test_existing_page))
-assert_equal(3, _test_existing_room.room_count)
-assert_equal("bush", _test_existing_room.current_encounter)
+bakery.assert_equal(Page, type(_test_existing_page))
+bakery.assert_equal(3, _test_existing_room.room_count)
+bakery.assert_equal("bush", _test_existing_room.current_encounter)
 
 
 _test_new_room = State(
@@ -1635,9 +1625,13 @@ _test_new_room = State(
 
 generate_dungeon_room(_test_new_room)
 
-assert_equal(1, _test_new_room.room_count)
-assert_equal("enemy", _test_new_room.current_encounter)
-assert_equal("Slime", _test_new_room.current_enemy.name)
+bakery.assert_equal(1, _test_new_room.room_count)
+bakery.assert_equal("enemy", _test_new_room.current_encounter)
+bakery.assert_equal(
+    "Slime",
+    _test_new_room.current_enemy.name
+    if _test_new_room.current_enemy is not None else ""
+)
 
 
 # start_dungeon()
@@ -1648,9 +1642,9 @@ _test_quest_restriction = State(
 
 _test_restriction_page = start_dungeon(_test_quest_restriction)
 
-assert_equal(Page, type(_test_restriction_page))
-assert_equal(False, _test_quest_restriction.dungeon_active)
-assert_equal(1, len(_test_quest_restriction.quests))
+bakery.assert_equal(Page, type(_test_restriction_page))
+bakery.assert_equal(False, _test_quest_restriction.dungeon_active)
+bakery.assert_equal(1, len(_test_quest_restriction.quests))
 
 
 _test_new_dungeon = State(
@@ -1663,8 +1657,8 @@ _test_new_dungeon = State(
 
 start_dungeon(_test_new_dungeon)
 
-assert_equal(True, _test_new_dungeon.dungeon_active)
-assert_equal((100, 0, "", 0, 0),
+bakery.assert_equal(True, _test_new_dungeon.dungeon_active)
+bakery.assert_equal((100, 0, "", 0, 0),
              (_test_new_dungeon.player_hp,
               _test_new_dungeon.room_count,
               _test_new_dungeon.current_encounter,
@@ -1682,9 +1676,13 @@ _test_resume = State(
 
 start_dungeon(_test_resume)
 
-assert_equal(2, _test_resume.room_count)
-assert_equal(123456, _test_resume.seed)
-assert_equal("Slime", _test_resume.current_enemy.name)
+bakery.assert_equal(2, _test_resume.room_count)
+bakery.assert_equal(123456, _test_resume.seed)
+bakery.assert_equal(
+    "Slime",
+    _test_resume.current_enemy.name
+    if _test_resume.current_enemy is not None else ""
+)
 
 # ==========================================
 # UNIT TESTS: DATACLASSES
@@ -1694,18 +1692,18 @@ assert_equal("Slime", _test_resume.current_enemy.name)
 
 _test_quest = Quest("Homework", 5, 20261115, 50, 25)
 
-assert_equal("Homework", _test_quest.name)
-assert_equal(5, _test_quest.difficulty)
-assert_equal((50, 25), (_test_quest.exp, _test_quest.gold))
+bakery.assert_equal("Homework", _test_quest.name)
+bakery.assert_equal(5, _test_quest.difficulty)
+bakery.assert_equal((50, 25), (_test_quest.exp, _test_quest.gold))
 
 
 # Enemy
 
 _test_enemy = Enemy("Bat", 1, 20, 20, 2, 0)
 
-assert_equal("Bat", _test_enemy.name)
-assert_equal((20, 20), (_test_enemy.hp, _test_enemy.max_hp))
-assert_equal((2, 0, False),
+bakery.assert_equal("Bat", _test_enemy.name)
+bakery.assert_equal((20, 20), (_test_enemy.hp, _test_enemy.max_hp))
+bakery.assert_equal((2, 0, False),
              (_test_enemy.attack, _test_enemy.defense,
               _test_enemy.is_strong))
 
@@ -1714,8 +1712,9 @@ assert_equal((2, 0, False),
 
 _test_state = State()
 
-assert_equal(2, _test_state.potion_count)
-assert_equal(5.0, _test_state.weapon_atk)
-assert_equal(1, _test_state.lvl)
+bakery.assert_equal(2, _test_state.potion_count)
+bakery.assert_equal(5.0, _test_state.weapon_atk)
+bakery.assert_equal(1, _test_state.lvl)
 
 start_server(State())
+
