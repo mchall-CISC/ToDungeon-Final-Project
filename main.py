@@ -708,9 +708,10 @@ def index(state: State, message: str = "") -> Page:
             )
 
     # Add a button for claiming completed quest rewards.
-    page_content.append(
-        Button("Complete Selected Quests", "complete_quests")
-    )
+    if len(state.quests) > 0:    
+        page_content.append(
+            Button("Complete Selected Quests", "complete_quests")
+        )
 
         # Add a button to navigate to the Add Quest page.
     page_content.append(Button("Add a Quest", "add_quest"))
