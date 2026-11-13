@@ -10,7 +10,7 @@ set_site_information(
     description="A program that tracks your 'To-Dos' and turns them into quests that you can earn rewards from completing.",
     sources="Drafter docs and my LLM.",
     planning=["plan.pdf", "design.pdf"],
-    links=["https://github.com/your-username/your-repository"]
+    links=["https://github.com/your-username/ToDungeon-Final-Project"]
 )
 hide_debug_information()
 set_website_framed(False)
